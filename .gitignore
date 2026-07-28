@@ -1,0 +1,63 @@
+cd ~/geriatric-hub1
+cat > .gitignore << 'EOF'
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.Python
+
+# Virtual environments
+venv/
+env/
+.venv/
+.env
+
+# Environment files with secrets
+.env
+.env.local
+*.env
+
+# IDE and editor
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# OS
+Thumbs.db
+
+# Project-specific: large binary files
+models/*.bin
+models/*.pt
+models/*.pth
+models/*.onnx
+models/*.ggml
+models/ggml-*
+
+# Voice templates (pickle files can be regenerated)
+voice_templates/*.pkl
+data/voice_templates/*.pkl
+
+# Audio recordings (raw WAV files can be large)
+recordings/*.wav
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# Testing artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Distribution
+build/
+dist/
+EOF
