@@ -8,7 +8,7 @@ pathway of the project is proven functional.
 import serial
 import time
 
-CAREGIVER_PHONE = "+233570001227"
+CAREGIVER_PHONE = "+233552427345"
 SERIAL_DEVICE = "/dev/serial0"
 BAUD_RATE = 9600
 
