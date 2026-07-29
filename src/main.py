@@ -72,7 +72,8 @@ from src.data_management.repositories  import (
 
 # -- Hardware Mocks ----------------------------------------------------------
 from src.hardware_mocks.mock_speaker    import MockSpeaker
-from src.hardware_mocks.mock_microphone import MockMicrophone, CommandEvent
+from src.hardware_mocks.mock_microphone import CommandEvent
+from src.voice_engine.whisper_spotter import WhisperSpotter as MockMicrophone
 from src.hardware_mocks.mock_gpio       import MockGPIOController
 from src.hardware_mocks.mock_sim800l    import MockGSMModule
 
