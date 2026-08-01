@@ -75,7 +75,7 @@ from src.hardware_mocks.mock_speaker    import MockSpeaker
 from src.hardware_mocks.mock_microphone import CommandEvent
 from src.voice_engine.whisper_spotter import WhisperSpotter as MockMicrophone
 from src.hardware_mocks.mock_gpio       import MockGPIOController
-from src.hardware_mocks.mock_sim800l    import MockGSMModule
+from src.communication.sim800l_gsm import SIM800LGSMModule as MockGSMModule
 
 # -- Control Logic Layer -----------------------------------------------------
 from src.control_logic.reminder_scheduler   import ReminderScheduler
