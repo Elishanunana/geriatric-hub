@@ -101,6 +101,7 @@ class SIM800LGSMModule:
         boot_delay: float = 2.0,
         registration_wait: float = 10.0,
         send_timeout: float = 30.0,
+        retry_cooldown: float = 8.0,
     ):
         """
         Parameters
@@ -121,6 +122,10 @@ class SIM800LGSMModule:
             when AT+CREG? is not yet registered.
         send_timeout : float
             Seconds to wait for the +CMGS confirmation after Ctrl-Z.
+        retry_cooldown : float
+            Minimum seconds between connection attempts after a failed one, so
+            the 30s background pollers don't spam the log while the module is
+            unavailable. A successful connection clears this.
         """
         self._port = port
         self._baud = baud
@@ -130,10 +135,18 @@ class SIM800LGSMModule:
         self._capacity = sim_storage_capacity
 
         self._serial: Any = None            # pyserial handle, opened lazily
-        self._serial_failed = False
+        # Only pyserial being absent is permanent (it can't appear at runtime).
+        # A failed open or AT handshake is treated as TRANSIENT — the module
+        # may still be powering up or registering — so we allow retries rather
+        # than latching GSM off for the whole session after one hiccup.
+        self._pyserial_missing = False
+        self._last_connect_attempt = 0.0
+        self._retry_cooldown = retry_cooldown
 
         # One lock for ALL UART access — concurrent SOS triggers must not
-        # interleave AT transactions on the shared serial line.
+        # interleave AT transactions on the shared serial line. Connection
+        # setup runs under this same lock (see _ensure_serial), so background
+        # pollers and the SOS path can never collide during open/handshake.
         self._serial_lock = threading.RLock()
 
         self._sent_log: List[OutboundSMS] = []
@@ -149,42 +162,75 @@ class SIM800LGSMModule:
     # -- Serial lifecycle ---------------------------------------------------
 
     def _ensure_serial(self) -> bool:
-        """Open the UART once and put the module in SMS text mode. Returns
-        False (and logs) on any failure, without raising, so the hub stays up."""
+        """
+        Ensure the UART is open and the module is in SMS text mode. Returns
+        False (and logs) on failure, without raising, so the hub stays up.
+
+        Thread-safety: the ENTIRE open + AT + CMGF handshake runs under
+        _serial_lock with double-checked locking. Multiple background threads
+        (SyncEngine, SMSPayloadHandler) and the SOS path can call this
+        concurrently; only the first performs the handshake, the rest reuse
+        the handle. Without this, two threads could open/mutate self._serial
+        at once and one would read from a half-closed port.
+        """
+        # Fast path: already connected (no lock needed for a plain reference read).
         if self._serial is not None:
             return True
-        if self._serial_failed:
-            return False
-        try:
-            import serial  # lazy: keeps this module importable without pyserial
-        except ImportError:
-            self._serial_failed = True
-            logger.error("pyserial not installed — run: python -m pip install pyserial")
-            print("[GSM]  X  pyserial not installed (pip install pyserial)")
-            return False
-        try:
-            ser = serial.Serial(self._port, self._baud, timeout=1)
-        except Exception as exc:  # noqa: BLE001 - report and degrade, don't crash
-            self._serial_failed = True
-            logger.error("Failed to open %s: %s", self._port, exc)
-            print(f"[GSM]  X  Failed to open {self._port}: {exc}")
-            print("[GSM]     Is serial enabled in raspi-config? Is wiring crossed?")
+        # Permanent-only short-circuit: pyserial can't appear mid-run.
+        if self._pyserial_missing:
             return False
 
-        time.sleep(self._boot_delay)
-        self._serial = ser
+        with self._serial_lock:
+            # Re-check now that we hold the lock — another thread may have
+            # connected (or failed) while we were waiting.
+            if self._serial is not None:
+                return True
+            if self._pyserial_missing:
+                return False
 
-        # Confirm the module answers, then set text mode.
-        if "OK" not in self._send_at("AT"):
-            logger.error("SIM800L not responding to AT — check TX/RX wiring.")
-            print("[GSM]  X  Module not responding to AT (check crossed TX/RX).")
-            self._serial = None
-            self._serial_failed = True
-            return False
-        self._send_at("AT+CMGF=1")   # SMS text mode
-        logger.info("SIM800L ready on %s @ %d baud.", self._port, self._baud)
-        print(f"[GSM]  OK  SIM800L ready on {self._port} @ {self._baud} baud.")
-        return True
+            # Cooldown: don't re-attempt (and re-spam logs) too soon after a
+            # failure. The 30s pollers would otherwise retry every cycle.
+            now = time.monotonic()
+            if (now - self._last_connect_attempt) < self._retry_cooldown \
+                    and self._last_connect_attempt > 0.0:
+                return False
+            self._last_connect_attempt = now
+
+            try:
+                import serial  # lazy: keeps this module importable w/o pyserial
+            except ImportError:
+                self._pyserial_missing = True   # permanent
+                logger.error("pyserial not installed — run: python -m pip install pyserial")
+                print("[GSM]  X  pyserial not installed (pip install pyserial)")
+                return False
+
+            try:
+                ser = serial.Serial(self._port, self._baud, timeout=1)
+            except Exception as exc:  # noqa: BLE001 - transient; allow retry
+                logger.error("Failed to open %s: %s", self._port, exc)
+                print(f"[GSM]  X  Failed to open {self._port}: {exc}")
+                print("[GSM]     Is serial enabled in raspi-config? Is wiring crossed?")
+                return False
+
+            time.sleep(self._boot_delay)
+            self._serial = ser
+
+            # Confirm the module answers, then set text mode. Still under the
+            # lock, so self._serial cannot be nulled by another thread here.
+            if "OK" not in self._send_at("AT"):
+                logger.error("SIM800L not responding to AT — check TX/RX wiring.")
+                print("[GSM]  X  Module not responding to AT (check crossed TX/RX).")
+                try:
+                    ser.close()
+                except Exception:  # noqa: BLE001
+                    pass
+                self._serial = None           # transient — retry after cooldown
+                return False
+
+            self._send_at("AT+CMGF=1")        # SMS text mode
+            logger.info("SIM800L ready on %s @ %d baud.", self._port, self._baud)
+            print(f"[GSM]  OK  SIM800L ready on {self._port} @ {self._baud} baud.")
+            return True
 
     def close(self) -> None:
         """Release the serial port. Optional; the mock has no equivalent, so
