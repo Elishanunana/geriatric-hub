@@ -85,7 +85,7 @@ logger = logging.getLogger(__name__)
 # ===========================================================================
 
 DEFAULT_COOLDOWN_SECONDS    = 30   # Suppress repeat triggers within this window.
-DEFAULT_TTS_CONFIRMATION    = "Yɛatu wo abusuafoɔ amaneɛ. Mmoa reba. Tena ase brɛoo."
+DEFAULT_TTS_CONFIRMATION    = "Yɛabɔ wo abusuafoɔ amaneɛ. Mmoa reba. Tena ase brɛoo."
 # Approximate translation: "We have alerted your family. Help is coming. Stay calm."
 # (Final phrasing pending validation in the User Needs Assessment, Section 3.2.)
 

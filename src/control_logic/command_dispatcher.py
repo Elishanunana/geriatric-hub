@@ -80,25 +80,25 @@ logger = logging.getLogger(__name__)
 # NOTE FOR THE PANEL: these prompts are placeholders, to be validated in
 # the User Needs Assessment phase per Section 3.2 of the project report.
 
-PROMPT_APPLIANCE_ON          = "Mahyɛ kanea no."
+PROMPT_APPLIANCE_ON          = "Masɔ kanea no."
 # Approximate translation: "I have switched on the light."
 
 PROMPT_APPLIANCE_OFF         = "Madum kanea no."
 # Approximate translation: "I have switched off the light."
 
-PROMPT_APPLIANCE_ALREADY_ON  = "Kanea no na adɛre."
+PROMPT_APPLIANCE_ALREADY_ON  = "Kanea no asɔ dedaw."
 # "The light is already on."
 
-PROMPT_APPLIANCE_ALREADY_OFF = "Kanea no adum dada."
+PROMPT_APPLIANCE_ALREADY_OFF = "Kanea no adum dedaw."
 # "The light is already off."
 
-PROMPT_NO_SCHEDULE_TODAY     = "Wonni aduru biara a wobɛnom ɛnnɛ."
+PROMPT_NO_SCHEDULE_TODAY     = "Wonni ɛduro biaa wobɛfa ɛnɛ"
 # "You have no medication scheduled for today."
 
 PROMPT_SCHEDULE_HEADER       = "Ɛnnɛ, wo aduru a wobɛnom nie:"
 # "Here is your medication for today:"
 
-PROMPT_RELAY_FAULT           = "Mintumi nyɛ no seesei. Mesrɛ wo, sɔ hwɛ bio."
+PROMPT_RELAY_FAULT           = "Mentumi nyɛ no seesei. Mesrɛ wo, sɔ hwɛ bio."
 # "I cannot do that right now. Please try again."
 
 
@@ -352,7 +352,7 @@ class CommandDispatcher:
         clauses = []
         for s in schedules:
             clauses.append(
-                f"{s.drug_name}, {s.dosage}, bere a ɛyɛ {s.time_due}."
+                f"{s.drug_name}, {s.dosage} sɛ ɛbɔ {s.time_due}."
             )
         return PROMPT_SCHEDULE_HEADER + " " + " ".join(clauses)
 
