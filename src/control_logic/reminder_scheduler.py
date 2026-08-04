@@ -117,20 +117,20 @@ def _dose_key(schedule_id: int, when: datetime) -> Tuple[int, str]:
 
 def _build_initial_prompt(sched: MedicationSchedule) -> str:
     return (
-        f"Akwaaba. Ɛyɛ bere a wo bɛnom wo aduru. "
+        f"Mmere aso sɛ wobɛfa wo aduru. "
         f"Fa {sched.drug_name}, {sched.dosage}. "
-        f"Sɛ wama wonom a, ka sɛ: Yɛ, mafa m'aduru."
+        f"Sɛ wanom wo aduru no aa ka sɛ aane m'afa m'aduru."
     )
 
 def _build_retry_prompt(sched: MedicationSchedule, attempt: int) -> str:
     return (
-        f"Mekae bio. Wonom wo {sched.drug_name} {sched.dosage} a? "
-        f"Sɛ woanom a, mesrɛ wo nom no seesei."
+        f"Merekae wo bio. Wanom wo {sched.drug_name} {sched.dosage} no anaa? "
+        f"Sɛ daabi aa mesrɛ wo nom no seesei."
     )
 
 def _build_final_missed_prompt(sched: MedicationSchedule) -> str:
     return (
-        f"Ɔhwɛfoɔ no bɛhwɛ wo. Yɛakyerɛw sɛ wonnom {sched.drug_name} ɛnnɛ."
+        f"Ɔhwɛfoɔ no bɛhwɛ wo. Yɛakyerɛw sɛ wonnom wo {sched.drug_name} ɛnnɛ."
     )
 
 
