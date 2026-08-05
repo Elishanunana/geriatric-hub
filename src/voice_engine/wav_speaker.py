@@ -74,7 +74,7 @@ class WavSpeaker:
     def __init__(
         self,
         prompts_dir: Optional[str] = None,
-        device: Optional[str] = None,
+        device: Optional[str] = "plughw:2,0",
         *,
         simulate_latency: bool = False,   # accepted for MockSpeaker parity (unused)
         latency_per_word: float = 0.0,    # accepted for MockSpeaker parity (unused)
