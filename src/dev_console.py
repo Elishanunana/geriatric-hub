@@ -191,7 +191,7 @@ def handle_choice(choice: str) -> bool:
             time_due="07:30",
         )
         send("INJECT_INBOUND_SMS", {
-            "sender": "+233244111111",
+            "sender": "+233200510903",
             "body":   body,
         })
 
@@ -208,7 +208,7 @@ def handle_choice(choice: str) -> bool:
 
     elif choice == "13":
         send("INJECT_INBOUND_SMS", {
-            "sender": "+233244111111",
+            "sender": "+233200510903",
             "body":   "MED|INSERT|broken",   # missing fields
         })
 
