@@ -110,7 +110,12 @@ logger = logging.getLogger("hub.main")
 # SystemConfig says. Used during the academic defense demo so the
 # caregiver-app side doesn't need to be plumbed with a matching key.
 # Production images should leave this False and let SystemConfig drive.
-FORCE_DEV_MOCK_HMAC = True
+#
+# Flipped to False: the caregiver app now signs SMS payloads with the
+# pairing token, and SystemConfig.hmac_key holds the same value, so the
+# hub verifies real HMAC-SHA256 tags. Dev-console MOCK injections are
+# consequently rejected at the HMAC stage (expected).
+FORCE_DEV_MOCK_HMAC = False
 
 
 # ===========================================================================
