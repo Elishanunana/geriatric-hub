@@ -197,6 +197,10 @@ class WhisperSpotter:
         input_device: Any = None,
         n_threads: int = 4,
         simulated_confidence: float = 1.0,   # accepted for MockMicrophone parity
+        energy_threshold: float = 0.02,      # RMS gate for speech onset (autonomous)
+        frame_seconds: float = 0.4,          # length of each onset-detection frame
+        post_command_cooldown: float = 1.0,  # quiet period after each recognition
+        calibrate_seconds: float = 1.0,      # ambient noise sampling at startup
     ):
         """
         Parameters
@@ -231,6 +235,11 @@ class WhisperSpotter:
         self._input_device = input_device
         self._n_threads = n_threads
         self._injected_confidence = simulated_confidence
+        self._energy_threshold = energy_threshold
+        self._frame_seconds = frame_seconds
+        self._post_command_cooldown = post_command_cooldown
+        self._calibrate_seconds = calibrate_seconds
+        self._effective_threshold = energy_threshold
 
         # Lazily-loaded whisper.cpp model handle.
         self._model: Any = None
@@ -285,9 +294,9 @@ class WhisperSpotter:
         self._listener_thread.start()
 
     def stop(self) -> None:
-        """Signal the listener thread to exit on its next input cycle."""
+        """Signal the listener thread to exit on its next frame."""
         self._stop_event.set()
-        print("[VOICE] Listener stopping (press Enter to release stdin).")
+        print("[VOICE] Listener stopping.")
 
     def inject_command(
         self,
@@ -384,20 +393,25 @@ class WhisperSpotter:
                         break
         return best_ratio, best_cmd
 
-    def _capture_and_recognise(self) -> Optional[CommandEvent]:
-        """One full cycle: record -> transcribe -> match -> emit-or-drop."""
+    def _capture_and_recognise(self, audio: Optional["Any"] = None) -> Optional[CommandEvent]:
+        """One full cycle: (record if needed) -> transcribe -> match -> emit.
+
+        If `audio` is supplied (autonomous listen path), it is used as-is;
+        otherwise a fresh recording is captured (interactive listen path).
+        """
         if not self._ensure_model():
             return None
-        print(f"[VOICE] Recording {self._record_seconds:g}s -- speak now...", flush=True)
-        try:
-            audio = record_from_mic(self._record_seconds, self._input_device)
-        except ImportError:
-            print("[VOICE]  X sounddevice not installed. Run: "
-                  "python -m pip install sounddevice")
-            return None
-        except Exception as exc:  # noqa: BLE001
-            print(f"[VOICE]  X Recording failed: {exc}")
-            return None
+        if audio is None:
+            print(f"[VOICE] Recording {self._record_seconds:g}s -- speak now...", flush=True)
+            try:
+                audio = record_from_mic(self._record_seconds, self._input_device)
+            except ImportError:
+                print("[VOICE]  X sounddevice not installed. Run: "
+                      "python -m pip install sounddevice")
+                return None
+            except Exception as exc:  # noqa: BLE001
+                print(f"[VOICE]  X Recording failed: {exc}")
+                return None
 
         print("[VOICE] Transcribing...", flush=True)
         text, elapsed = self._transcribe(audio)
@@ -443,28 +457,101 @@ class WhisperSpotter:
 
     def _listen_loop(self) -> None:
         # Preload the model up front (on this worker thread) so the first
-        # recording is not delayed by the load. A failure here is non-fatal:
+        # recognition is not delayed by the load. A failure here is non-fatal:
         # the dev-console injection pathway still works without the model.
         self._ensure_model()
-        self._print_menu()
-        while not self._stop_event.is_set():
-            try:
-                choice = input("[VOICE] [Enter]=speak  q=quit > ").strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                break
-            if choice in ("quit", "exit", "q"):
-                self._stop_event.set()
-                break
-            self._capture_and_recognise()
+        self._effective_threshold = self._energy_threshold
+        self._print_ready_banner()
 
-    def _print_menu(self) -> None:
+        # Sample the ambient noise floor once so a loud room doesn't trigger
+        # constant false captures. In a quiet room the static default wins.
+        try:
+            self._calibrate_noise_floor()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("noise calibration skipped: %s", exc)
+
+        # Autonomous energy-gated loop: cheap and silent until speech is heard,
+        # then capture one utterance and recognise it. No stdin — runs headless
+        # under systemd at boot.
+        while not self._stop_event.is_set():
+            trigger = self._wait_for_speech()
+            if trigger is None:
+                break  # stop requested (or audio stack unavailable)
+            audio = self._capture_utterance(prefix=trigger)
+            if audio is not None:
+                self._capture_and_recognise(audio=audio)
+            # Quiet period so the utterance tail — and any spoken response the
+            # hub plays back — doesn't immediately re-trigger the mic.
+            if self._stop_event.wait(self._post_command_cooldown):
+                break
+
+    def _read_frame(self, seconds: float) -> Tuple[Optional["Any"], float]:
+        """Record one short frame; return (audio_16k_f32, rms_energy).
+        Returns (None, 0.0) if the audio stack is unavailable or errors."""
+        try:
+            import numpy as np
+            audio = record_from_mic(seconds, self._input_device)
+        except ImportError:
+            return None, 0.0
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("frame capture failed: %s", exc)
+            return None, 0.0
+        if audio is None or len(audio) == 0:
+            return None, 0.0
+        rms = float(np.sqrt(np.mean(np.square(audio))))
+        return audio, rms
+
+    def _calibrate_noise_floor(self) -> None:
+        """Measure ambient RMS briefly and raise the speech threshold above the
+        noise floor if the room is loud; never drops below the static default.
+        Logs the chosen threshold for tuning."""
+        _, floor = self._read_frame(self._calibrate_seconds)
+        adaptive = floor * 2.5 + 0.008
+        self._effective_threshold = max(self._energy_threshold, adaptive)
+        print(f"[VOICE] Ambient noise floor RMS={floor:.4f}  ->  "
+              f"speech threshold={self._effective_threshold:.4f}")
+
+    def _wait_for_speech(self) -> Optional["Any"]:
+        """Block in short frames until RMS crosses the speech threshold or a
+        stop is signalled. Returns the triggering audio frame (so the onset
+        isn't clipped from the capture) or None when stopping."""
+        while not self._stop_event.is_set():
+            audio, rms = self._read_frame(self._frame_seconds)
+            if audio is None:
+                # Audio stack unavailable — back off instead of spinning hot.
+                if self._stop_event.wait(1.0):
+                    return None
+                continue
+            if rms >= self._effective_threshold:
+                logger.debug("speech onset detected (rms=%.4f)", rms)
+                return audio
+        return None
+
+    def _capture_utterance(self, prefix: Optional["Any"] = None) -> Optional["Any"]:
+        """Record the remainder of an utterance and prepend the trigger frame
+        so the first syllable isn't lost. Returns 16 kHz float32 audio."""
+        import numpy as np
+        remainder = max(0.0, self._record_seconds - self._frame_seconds)
+        tail = None
+        if remainder > 0:
+            try:
+                tail = record_from_mic(remainder, self._input_device)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("utterance capture failed: %s", exc)
+                tail = None
+        parts = [p for p in (prefix, tail) if p is not None and len(p) > 0]
+        if not parts:
+            return None
+        return np.concatenate(parts)
+
+    def _print_ready_banner(self) -> None:
         print("\n" + "=" * 70)
-        print("  WHISPER SPOTTER -- Twi voice command engine (press-to-record)")
+        print("  WHISPER SPOTTER -- Twi voice command engine (autonomous)")
+        print("  Listening continuously; acts only on in-vocabulary commands.")
         print("  (Vocabulary from Table 3.2 of the project report)")
         print("=" * 70)
         for idx, cmd in enumerate(TWI_VOCABULARY, start=1):
             print(f"  [{idx}]  {cmd.twi_phrase:<25}  ->  {cmd.action}")
-        print("\n  Press Enter, then speak a command. Type 'q' to stop.")
         print("=" * 70 + "\n")
 
 
