@@ -506,7 +506,7 @@ class WhisperSpotter:
         noise floor if the room is loud; never drops below the static default.
         Logs the chosen threshold for tuning."""
         _, floor = self._read_frame(self._calibrate_seconds)
-        adaptive = floor * 2.5 + 0.008
+        adaptive = floor * 1.5 + 0.004
         self._effective_threshold = max(self._energy_threshold, adaptive)
         print(f"[VOICE] Ambient noise floor RMS={floor:.4f}  ->  "
               f"speech threshold={self._effective_threshold:.4f}")
